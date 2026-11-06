@@ -1,13 +1,13 @@
 # NUT Server + Client Setup Guide
 
-**Setup this guide is written for:**
+**Example setup used in this guide:**
 
 | Role | Machine | Package | `nut.conf` mode |
 |---|---|---|---|
-| NUT server (primary) | Ubuntu 24.04 VM (`ubu`), UPS passed through over USB | `nut` (NUT 2.8.1) | `netserver` |
+| NUT server (primary) | Ubuntu 24.04 VM, UPS passed through over USB | `nut` (NUT 2.8.1) | `netserver` |
 | NUT client (secondary) | Proxmox VE host | `nut-client` | `netclient` |
 
-**UPS:** APC Back-UPS NS 1500M2, USB ID `051d:0002`, serial `0B2548L00791`, NUT name `apc`
+**UPS:** APC Back-UPS NS 1500M2, USB ID `051d:0002`, serial `<your-ups-serial>`, NUT name `apc`
 
 Replace anything in `<angle brackets>` with your own values. Each step says *why* as well as *what*, so you can adapt it to other setups.
 
@@ -127,7 +127,7 @@ maxretry = 3
     desc = "APC Back-UPS NS 1500M2"
     vendorid = 051d
     productid = 0002
-    serial = 0B2548L00791
+    serial = <your-ups-serial>      # from: upsc apc@localhost ups.serial or nut-scanner -U
 ```
 
 - `[apc]` is the UPS name used everywhere else (`apc@localhost`, `apc@<server-ip>`).
@@ -261,7 +261,7 @@ timer = runtime at your normal load − time for a full clean shutdown − buffe
 - Runtime: `upsc apc@localhost battery.runtime`. Check it after a calibration, at your normal load.
 - Shutdown time: measure it in Part 4, Test 3.
 - Example: 600 s runtime − 240 s shutdown − 60 s buffer = **300 s**.
-- On a weak battery (~141 s of runtime), a 120 s timer leaves only ~20 s to shut down, which is not enough. Fix the battery first, or use a much shorter timer.
+- On a weak battery (e.g. ~140 s of runtime), a 120 s timer leaves only ~20 s to shut down, which is not enough. Fix the battery first, or use a much shorter timer.
 
 ## 2.11 `/etc/nut/upssched-cmd`
 
@@ -314,7 +314,7 @@ sudo systemctl enable nut-server nut-monitor
 
 upsc apc@localhost ups.status        # expect: OL
 upsc apc@localhost                   # full variable list
-upsc apc@localhost ups.serial        # 0B2548L00791
+upsc apc@localhost ups.serial        # your UPS serial number
 ```
 
 - **`nut-driver-enumerator`** reads `ups.conf` and creates one `nut-driver@<name>` service per UPS. Re-run it whenever you change `ups.conf`.
@@ -400,7 +400,7 @@ When the host gets `shutdown`, Proxmox stops every guest first. How cleanly that
 
 - **Start/Shutdown order:** guests stop in the reverse of their startup order. Give the **NUT server VM order 1**, so it starts first and stops last.
 - **Shutdown timeout:** Proxmox waits this long per guest before forcing it off (the default is 180 s). Every hung guest eats into your battery time.
-- **QEMU guest agent:** install it in each VM and enable *QEMU Guest Agent* in VM → Options. Shutdown then becomes a reliable request instead of an ACPI button press the guest might ignore. This matters most for TrueNAS.
+- **QEMU guest agent:** install it in each VM and enable *QEMU Guest Agent* in VM → Options. Shutdown then becomes a reliable request instead of an ACPI button press the guest might ignore. This matters most for storage VMs such as TrueNAS.
 
 ---
 
@@ -461,7 +461,7 @@ The order of events:
 
 **⚠ If the NUT server is a VM on the host it protects:**
 
-- **Don't let the UPS cut power.** The NUT VM can finish shutting down while the host is still stopping other guests, such as TrueNAS. If the UPS cuts power at that point, those guests lose power partway through shutting down. Either remove `POWERDOWNFLAG` from the server's `upsmon.conf`, or make sure the UPS can't be powered off from here.
+- **Don't let the UPS cut power.** The NUT VM can finish shutting down while the host is still stopping other guests, such as a NAS VM. If the UPS cuts power at that point, those guests lose power partway through shutting down. Either remove `POWERDOWNFLAG` from the server's `upsmon.conf`, or make sure the UPS can't be powered off from here.
 - **Power returning during a shutdown:** the host finishes shutting down, and because the UPS outlets never went off, nothing turns it back on. The BIOS setting doesn't help, because the power never actually dropped. Bring the host back with IPMI instead:
   ```bash
   ipmitool -I lanplus -H <ipmi-ip> -U <user> -P <pass> power on
@@ -470,7 +470,7 @@ The order of events:
 
 ---
 
-# Part 6 — Troubleshooting (errors we actually hit)
+# Part 6 — Troubleshooting (common errors)
 
 | Error | Meaning | Fix |
 |---|---|---|
@@ -507,7 +507,7 @@ This guide was checked against Techno Tim's NUT guide. These are the deliberate 
 
 | Techno Tim | This guide | Why |
 |---|---|---|
-| `upssched.conf` starts `earlyshutdown` on ONBATT with **no cancel** | Adds `AT ONLINE * CANCEL-TIMER earlyshutdown` | Without it, any blip causes a full shutdown. This is the exact bug you hit. |
+| `upssched.conf` starts `earlyshutdown` on ONBATT with **no cancel** | Adds `AT ONLINE * CANCEL-TIMER earlyshutdown` | Without it, any blip causes a full shutdown. This is the most common NUT timer mistake. |
 | No calibration handling | `CAL` cancel rule + a `CAL` check in the script | Otherwise battery tests trigger a shutdown |
 | One user (`admin`, `master`) shared by the server and clients | Separate `primary`, `secondary` and `admin` users | Least privilege: clients can't run commands on the UPS |
 | `LISTEN 0.0.0.0 3493` | Listens on localhost + the LAN IP, with a firewall rule | Smaller attack surface |
